@@ -1,12 +1,26 @@
 package com.example.todoapp
+import android.content.Context
+import android.database.DatabaseErrorHandler
+import android.database.SQLException
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.ImageDecoder
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.provider.MediaStore
+import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.scrollable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,6 +30,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -24,11 +39,15 @@ import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.KeyboardArrowUp
@@ -41,6 +60,8 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -49,29 +70,48 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontLoadingStrategy.Companion.Async
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.LiveData
+import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.Observer
 import androidx.lifecycle.ViewModelProvider
+import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavHostController
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
 import com.example.todoapp.Database.DayDatabse
 import com.example.todoapp.Database.DayEntitiy
 import com.example.todoapp.Database.Repository
 import com.example.todoapp.Database.TaskStructure
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.DelicateCoroutinesApi
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.async
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.jetbrains.annotations.Async
+import java.io.ByteArrayOutputStream
 import java.text.DateFormatSymbols
 import java.time.LocalDateTime
+import java.util.Base64
+import kotlin.io.encoding.ExperimentalEncodingApi
+import kotlin.math.exp
 
 class MainActivity : ComponentActivity() {
     private var present_date = getTodayMonthDate().first
     private var present_month = getTodayMonthDate().second
-    var init = 0
+    var index=2
     private lateinit var viewModel: MainActivityViewModel
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -79,8 +119,6 @@ class MainActivity : ComponentActivity() {
         val repository = Repository(dao)
         val factory = ViewModelFactory(repository = repository)
         viewModel = ViewModelProvider(this, factory)[MainActivityViewModel::class.java]
-        present_date= viewModel._dateChanging.value!!
-        viewModel.setHighlightValue(present_date)
         setContent {
             MyApp()
         }
@@ -97,37 +135,466 @@ class MainActivity : ComponentActivity() {
             composable("floating") {
                 trial1_displayWindow(navController)
             }
+            composable("view_notes") {
+                trial1_displayWindow(navController)
+            }
         }
     }
-
     @Composable
-    fun trial1_displayWindow(navHostController: NavHostController) {
-        var heading by remember { mutableStateOf("") }
-        var description by remember { mutableStateOf("") }
-        var date_change by remember { mutableStateOf(viewModel._dateChanging.value) }
-        viewModel._dateChanging.observe(this, Observer {
-            date_change = it
-        })
-        var entity1 by remember {
-            mutableStateOf(date_change?.let {
-                viewModel.retrieveDayTasks(
-                    it,
-                    LocalDateTime.now().monthValue
-                ).value
-            })
-        }
-        viewModel.date_highlighted?.let {
-            it.value?.let { it1 ->
-                viewModel.retrieveDayTasks(it1, LocalDateTime.now().monthValue).observe(this@MainActivity, Observer {
-                    entity1 = it
-                    println("data of highlighted2:" + it.toString())
-                })
+    fun LinkCardView(title: String){
+        var expandable by remember { mutableStateOf(false) }
+        val context = LocalContext.current
+        var selected by remember { mutableStateOf(false) }
+        val link1: MutableList<String> = ArrayList()
+        val link by remember { mutableStateOf(link1) }
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(0.dp, Color.Black)
+                .padding(10.dp)
+        ) {
+            val color = if (selected) Color.Blue else Color.Black
+            println("recomposed-8")
+            Column {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp),
+                    horizontalArrangement = Arrangement.Start
+                ) {
+                    IconButton(
+                        onClick = { selected = !selected },
+                        modifier = Modifier.size(30.dp)
+                    ) {
+                        Icon(
+                            BitmapFactory.decodeResource(context.resources, R.drawable.link)
+                                .asImageBitmap(),
+                            contentDescription = "link",
+                            tint = color
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Column {
+                        Spacer(modifier = Modifier.width(15.dp))
+                        Text(
+                            text = title,
+                            color = Color.Black,
+                            modifier = Modifier.wrapContentSize()
+                        )
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        IconButton(
+                            onClick = { expandable = !expandable },
+                            modifier = Modifier.size(30.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (expandable) Icons.Filled.KeyboardArrowUp else Icons.Filled.ArrowDropDown,
+                                contentDescription = if (expandable) "Arrow_up" else "Arrow_down",
+                                tint = color
+                            )
+                        }
+                    }
+                }
+                if (expandable) {  /*recomposed every time I press add*/
+                    var clicked by remember { mutableStateOf(false) }
+                    var s by remember { mutableStateOf("") }
+                    Column {
+                        val scrollState = rememberScrollState()
+                        Box(modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(0.dp, 100.dp)) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .verticalScroll(scrollState)
+                            ) {
+                                for (i in 0..<link.size) {
+                                    Card(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(10.dp)
+                                    ) {
+                                        Text(text = link[i])
+                                    }
+                                    Spacer(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(8.dp)
+                                    )
+                                }
+                            }
+                        }
+                        on_add {
+                            clicked = true
+                            s=it
+                        }
+                        if (clicked) {
+                            link.add(s)
+                            viewModel.set_link(link)
+                            clicked = false
+                        }
+                        s = ""
+                    }
+                }
             }
+        }
+    }
+    @Composable
+    fun on_add(onClick: (String) -> Unit): String{
+        var single_link by remember{ mutableStateOf("") }
+        Row {
+            OutlinedTextField(
+                value = single_link, onValueChange = {
+                    single_link = it
+                },
+                label = {
+                    Text(text = "Link.")
+                },
+                modifier = Modifier
+                    .wrapContentSize()
+                    .padding(4.dp)
+            )
+            Row (modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End){
+                Button(onClick = {
+                    println("clicked-2")
+                    onClick(single_link)
+                    single_link=""
+                }) {
+                    Text(text = "save", fontSize = 9.sp)
+                }
+            }
+        }
+    return single_link
+    }
+    @Composable
+    fun on_add_1(onClick: (Pair<String,String>) -> Unit){
+        var name by remember{ mutableStateOf("") }
+        var amount by remember{ mutableStateOf("") }
+        Row {
+            OutlinedTextField(
+                value = name, onValueChange = {
+                    name = it
+                },
+                label = {
+                    Text(text = "Name")
+                },
+                modifier = Modifier
+                    .width(150.dp)
+                    .padding(4.dp)
+            )
+            OutlinedTextField(
+                value = amount, onValueChange = {
+                    amount=it
+                },
+                label = {
+                    Text(text = "Amount")
+                },
+                modifier = Modifier
+                    .width(150.dp)
+                    .padding(4.dp)
+            )
+            Row (modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End){
+                Button(onClick = {
+                    if(name!=""&&amount!="") {
+                        println("clicked-2")
+                        onClick(Pair(amount,name))
+                        name=""
+                        amount=""
+                    }else{
+                        Toast.makeText(this@MainActivity, "please enter all fields!", Toast.LENGTH_SHORT).show()
+                    }
+                }) {
+                    Text(text = "pay", fontSize = 9.sp)
+                }
+            }
+        }
+    }
+    @Composable
+    fun PayCardView(title: String){
+        var expandable by remember { mutableStateOf(false) }
+        val context = LocalContext.current
+        var selected by remember { mutableStateOf(false) }
+        var clicked by remember { mutableStateOf(false) }
+        var link by remember {
+            mutableStateOf<MutableList<Pair<String,String>>>(ArrayList())  //amount,name
         }
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(Color.White),
+                .border(0.dp, Color.Black)
+                .padding(10.dp)
+        ) {
+            var color = if (selected) Color.Blue else Color.Black
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(50.dp),
+                horizontalArrangement = Arrangement.Start
+            ) {
+                IconButton(
+                    onClick = {
+                        selected = !selected
+                        expandable=!expandable
+                              },
+                    modifier = Modifier.size(30.dp)
+                ) {
+                    Icon(
+                        BitmapFactory.decodeResource(context.resources, R.drawable.img_1).asImageBitmap(),
+                        contentDescription = "Pay",
+                        tint = color
+                    )
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+                Column {
+                    Spacer(modifier = Modifier.width(15.dp))
+                    Text(text = title, color = Color.Black, modifier = Modifier.wrapContentSize())
+                }
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    IconButton(
+                        onClick = { expandable = !expandable },
+                        modifier = Modifier.size(30.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (expandable) Icons.Filled.KeyboardArrowUp else Icons.Filled.ArrowDropDown,
+                            contentDescription = if (expandable) "Arrow_up" else "Arrow_down",
+                            tint = color
+                        )
+                    }
+                }
+            }
+            if (expandable) {
+                Column {
+                    val scrollState = rememberScrollState()
+                    Box(modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(0.dp, 100.dp)) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .verticalScroll(scrollState)
+                        ) {
+                            for (i in 0..<link.size) {
+                                Card(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(30.dp)
+                                ) {
+                                    Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center) {
+                                        Row {
+                                            Text(text = "Name: "+link[i].second, modifier = Modifier
+                                                .fillMaxHeight()
+                                                .padding(5.dp))
+                                            Spacer(modifier = Modifier.width(20.dp))
+                                            Text(text = "Amount: "+link[i].first,modifier= Modifier
+                                                .fillMaxHeight()
+                                                .padding(5.dp))
+                                        }
+                                    }
+                                }
+                                Spacer(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(8.dp)
+                                )
+                            }
+                        }
+                    }
+                    on_add_1 {
+                        Toast.makeText(this@MainActivity, it.first +" " +it.second, Toast.LENGTH_SHORT).show()
+                        link.add(it)
+                        viewModel.set_pay(link)
+                        clicked=true
+                    }
+                    if(clicked){
+                        clicked=false
+                    }
+                }
+            }
+        }
+    }
+    @Composable
+    fun PhotoCardView(title: String){
+        var expandable by remember { mutableStateOf(false) }
+        val context = LocalContext.current
+        var selected by remember { mutableStateOf(false) }
+        var list_images by remember {
+            mutableStateOf<MutableList<String>>(ArrayList())
+        }
+        var checkedItemsCount by remember{
+            mutableStateOf("")
+        }
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(0.dp, Color.Black)
+                .padding(10.dp)
+                .border(2.dp, Color.Blue)
+        ) {
+            val color = if (selected) Color.Blue else Color.Black
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(50.dp),
+                horizontalArrangement = Arrangement.Start
+            ) {
+                IconButton(
+                    onClick = {
+                        selected = !selected
+                    },
+                    modifier = Modifier.size(30.dp)
+                ) {
+                    Icon(
+                        BitmapFactory.decodeResource(context.resources, R.drawable.gallery).asImageBitmap(),
+                        contentDescription = "Photos",
+                        tint = color
+                    )
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+                Column {
+                    Spacer(modifier = Modifier.width(15.dp))
+                    Text(text = title, color = Color.Black, modifier = Modifier.wrapContentSize())
+                }
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    IconButton(
+                        onClick = {
+                              expandable = !expandable
+                              },
+                        modifier = Modifier.size(30.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (expandable) Icons.Filled.KeyboardArrowUp else Icons.Filled.ArrowDropDown,
+                            contentDescription = if (expandable) "Arrow_up" else "Arrow_down",
+                            tint = color
+                        )
+                    }
+                }
+            }
+            if(expandable){
+                checkedItemsCount="open"
+            }else{
+                checkedItemsCount="closed"
+            }
+            if (checkedItemsCount!="closed") {
+                if(list_images.size>0){
+                    displayImages(base64String = list_images)
+                }
+                gallery_launcher().observe(this@MainActivity, Observer {
+                    println("observed"+it)
+                    if(it!=null) {
+                        list_images.add(it)
+                        viewModel.set_photo(list_images)
+                        println("size of photo list"+list_images.size)
+                    checkedItemsCount="open_closed"
+                    }
+                })
+
+            }
+        }
+    }
+    @Composable
+    fun displayImages(base64String : MutableList<String>){
+        val scrollState = rememberScrollState()
+        Row(
+            modifier = Modifier
+                .heightIn(0.dp, 100.dp)
+                .horizontalScroll(scrollState)
+        ) {
+            println("recomposd photocard"+base64String.size)
+            for (i in 0..<base64String.size) {
+                display_photo(base64 = base64String[i])
+                Spacer(modifier = Modifier.width(5.dp))
+            }
+        }
+    }
+    @Composable
+    fun add_on(){
+        var width by remember {
+            mutableStateOf(0)
+        }
+        println("recomposed cosof width"+width)
+        Row(modifier = Modifier
+            .fillMaxWidth()
+            .padding(10.dp)
+            .onGloballyPositioned {
+                width = it.size.width
+            }, horizontalArrangement = Arrangement.SpaceEvenly){
+            Card(modifier = Modifier
+                .width((width).dp)
+                .height(150.dp)){
+                Text(text = "Personal To-Dos", color = Color.Blue, fontWeight = FontWeight.Bold, modifier = Modifier.padding(10.dp))
+                Text(text = "Click to Add..", modifier = Modifier.padding(5.dp))
+            }
+        }
+        Spacer(modifier = Modifier.height(10.dp))
+    }
+    @Composable
+    fun gallery_launcher() : MutableLiveData<String?>{
+        var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
+        val live = MutableLiveData<String?>(null)
+         val context = LocalContext.current
+        val launcher = rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.GetContent()
+        )  { uri: Uri? ->
+            selectedImageUri = uri
+            uri?.let {
+                   live.value=uriToBase64(context,it)
+             }
+        }
+        Column {
+            Row (modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center){
+                Button(
+                    onClick = {
+                        launcher.launch("image/*")
+                    }
+                ) {
+                    Text(text = "Select Image")
+                }
+            }
+        }
+     return live
+    }
+    @OptIn(ExperimentalEncodingApi::class)//
+    fun uriToBase64(context: Context, uri: Uri): String {
+        val bitmap = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            val source = ImageDecoder.createSource(context.contentResolver, uri)
+            ImageDecoder.decodeBitmap(source)
+        } else {
+            @Suppress("DEPRECATION")
+            MediaStore.Images.Media.getBitmap(context.contentResolver, uri)
+        }
+
+        val outputStream = ByteArrayOutputStream()
+        bitmap.compress(Bitmap.CompressFormat.JPEG, 100, outputStream)
+        val byteArray = outputStream.toByteArray()
+        return kotlin.io.encoding.Base64.encode(byteArray)
+    }
+     @Composable
+     fun display_photo(base64: String){  //output is an Image composable for that we need an imaebitmap
+          var decodeString : ByteArray? = null
+         try{
+              decodeString=Base64.getDecoder().decode(base64)
+          }catch (e :Exception){
+                e.printStackTrace()
+          }
+         if(decodeString!=null){
+             val bitmap = BitmapFactory.decodeByteArray(decodeString,0,decodeString.size)
+             Image(bitmap.asImageBitmap(), contentDescription = "selected photo", modifier = Modifier.size(100.dp), contentScale = ContentScale.Crop)
+
+         }else{
+             Text(text = "not able to display")
+         }
+     }
+    @Composable
+    fun trial1_displayWindow(navHostController: NavHostController) {
+        val context= LocalContext.current
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Color.White)
         ) {
             Text(
                 "New Task:",
@@ -138,63 +605,57 @@ class MainActivity : ComponentActivity() {
                 fontSize = 15.sp
             )
             Spacer(modifier = Modifier.height(20.dp))
-            heading = information(label = "Title")
+           information(label = "Title")
             Spacer(
                 modifier = Modifier
                     .height(10.dp)
                     .fillMaxWidth()
             )
-            description = information(label = " ")
-            Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.Bottom) {
-                expandable_CardView(title = "Link", "link")    /*display other functions*/
-                Spacer(
-                    modifier = Modifier
-                        .height(10.dp)
-                        .fillMaxWidth()
-                )
-                expandable_CardView(title = "Pay", "pay")
-                Spacer(
-                    modifier = Modifier
-                        .height(10.dp)
-                        .fillMaxWidth()
-                )
-                expandable_CardView(title = "Photo", "photo")
+            information(label = " ")
+            var firstColumnHeight by remember {
+                mutableStateOf(0)
+            }
+            Column(modifier = Modifier
+                .fillMaxSize()
+                .onGloballyPositioned { coordinates ->
+                    firstColumnHeight = coordinates.size.height
+                }, verticalArrangement = Arrangement.Bottom,
+                ) {
+                val scrollState = rememberScrollState()
+                Column(modifier = Modifier
+                    .padding(5.dp)
+                    .heightIn(0.dp, (0.3f * firstColumnHeight).dp)
+                    .verticalScroll(scrollState)
+                    .border(2.dp, Color.Black)
+                ) {
+                    LinkCardView(title = "link")
+                    Spacer(
+                        modifier = Modifier
+                            .height(10.dp)
+                            .fillMaxWidth()
+                    )
+                    PhotoCardView(title = "attach photos!!")
+                    Spacer(
+                        modifier = Modifier
+                            .height(10.dp)
+                            .fillMaxWidth()
+                    )
+                    PayCardView(title = "Name,Amount")
+                }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.End
                 ) {
                     Button(onClick = {
-                        val task = TaskStructure(
-                            heading = heading,
-                            complete = false,
-                            description = description
-                        )
-                        if (entity1 == null) {
-                            println("empty entity")
-                            val tasks: MutableList<TaskStructure> = ArrayList()
-                            tasks.add(task)
-                            viewModel!!.date_highlighted?.let {
-                                it.value?.let { it1 ->
-                                    viewModel.insertDayTasks(tasks, LocalDateTime.now().monthValue,
-                                        it1
-                                    )
-                                }
+                        viewModel.insertDayTasks(present_month,present_date).observe(this@MainActivity,Observer{
+                            if(it==true){
+                                Toast.makeText(context, "saved", Toast.LENGTH_SHORT).show()
+                                viewModel.reset()
+                                navHostController.popBackStack()
+                            }else{
+                                Toast.makeText(context, "saving..", Toast.LENGTH_SHORT).show()
                             }
-                        } else {
-                            println("entered else")
-                            val tasks: MutableList<TaskStructure> = entity1!!.tasksList
-                            println(tasks)
-                            tasks.add(task)
-                            viewModel.date_highlighted?.let {
-                                it.value?.let { it1 ->
-                                    viewModel.insertDayTasks(tasks, LocalDateTime.now().monthValue,
-                                        it1
-                                    )
-                                }
-                            }
-                        }
-                        Toast.makeText(this@MainActivity, "Saved", Toast.LENGTH_SHORT).show()
-                        navHostController.popBackStack()
+                        })
                     }) {
                         Text(text = "Save", modifier = Modifier.wrapContentSize())
                     }
@@ -203,13 +664,15 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    @OptIn(DelicateCoroutinesApi::class)
     @Composable
-    fun information(label: String): String {
+    fun information(label: String){
         var heading by remember { mutableStateOf("") }
         if (label == "Title") {
             OutlinedTextField(
                 value = heading, onValueChange = {
-                    heading = it
+                         heading=it
+                         viewModel.set_titile(heading)
                 },
                 label = {
                     Text(text = label)
@@ -227,116 +690,10 @@ class MainActivity : ComponentActivity() {
             ) {
                 TextField(value = heading, onValueChange = {
                     heading = it
+                    viewModel.set_description(heading)
                 }, modifier = Modifier.fillMaxSize(), label = {
                     Text(text = "Task Description")
                 })
-            }
-        }
-        return heading
-    }
-
-    @Composable
-    fun expandable_CardView(title: String, inputType: String) {
-        var expandable by remember { mutableStateOf(false) }
-        val context = LocalContext.current
-        var selected by remember { mutableStateOf(false) }
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .border(0.dp, Color.Black)
-                .padding(10.dp)
-                .clickable {
-                    expandable = !expandable
-                    selected = !selected
-                }
-        ) {
-            var color = Color.Black
-            if (selected) {
-                color = Color.Blue
-            }
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(50.dp),
-                horizontalArrangement = Arrangement.Start
-            ) {
-                when (inputType) {
-                    "link" -> {
-                        IconButton(
-                            onClick = { selected = !selected },
-                            modifier = Modifier.size(30.dp)
-                        ) {
-                            Icon(
-                                BitmapFactory.decodeResource(context.resources, R.drawable.link)
-                                    .asImageBitmap(),
-                                contentDescription = "link",
-                                tint = color
-                            )
-                        }
-                    }
-
-                    "photo" -> {
-                        IconButton(
-                            onClick = { selected = !selected },
-                            modifier = Modifier.size(30.dp)
-                        ) {
-                            Icon(
-                                BitmapFactory.decodeResource(context.resources, R.drawable.gallery)
-                                    .asImageBitmap(),
-                                contentDescription = "Photos",
-                                tint = color
-                            )
-                        }
-                    }
-
-                    "pay" -> {
-                        IconButton(
-                            onClick = { selected = !selected },
-                            modifier = Modifier.size(30.dp)
-                        ) {
-                            Icon(
-                                BitmapFactory.decodeResource(context.resources, R.drawable.img_1)
-                                    .asImageBitmap(),
-                                contentDescription = "Pay",
-                                tint = color
-                            )
-                        }
-                    }
-                }
-                Spacer(modifier = Modifier.width(8.dp))
-                Column {
-                    Spacer(modifier = Modifier.width(15.dp))
-                    Text(text = title, color = Color.Black, modifier = Modifier.wrapContentSize())
-                }
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                    if (!expandable) {
-                        IconButton(
-                            onClick = { },
-                            modifier = Modifier.size(30.dp)
-                        ) {
-                            Icon(
-                                Icons.Filled.ArrowDropDown,
-                                contentDescription = "Arrow_down",
-                                tint = color
-                            )
-                        }
-                    } else {
-                        IconButton(
-                            onClick = { },
-                            modifier = Modifier.size(30.dp)
-                        ) {
-                            Icon(
-                                Icons.Filled.KeyboardArrowUp,
-                                contentDescription = "Arrow_up",
-                                tint = color
-                            )
-                        }
-                    }
-
-                }
-            }
-            if (expandable) {
-                Text(text = "coming", modifier = Modifier.fillMaxWidth())
             }
         }
     }
@@ -350,47 +707,24 @@ class MainActivity : ComponentActivity() {
             date_change = it
         })
         Column(modifier = Modifier.fillMaxSize()) {
-            Spacer(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(50.dp)
-            )
             Display_dates()   /*displays dates 5 circles*/
-            finalDisplay()    /*displays previous tasks and add new task*/
-            Column(
-                modifier = Modifier    /*responsible for adding an Icon button at the bottom left*/
-                    .fillMaxSize()
-                    .padding(bottom = 50.dp), verticalArrangement = Arrangement.Bottom
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(10.dp)
-                        .wrapContentHeight(), horizontalArrangement = Arrangement.End
-                ) {
-                    IconButton(
-                        modifier = Modifier
-                            .size(50.dp)
-                            .background(Color.Blue, CircleShape)
-                            .border(1.dp, Color.Magenta, shape = CircleShape),
-                        onClick = {
-                            navHostController.navigate("floating")
-                        }
-                    ) {
-                        Icon(
-                            Icons.Filled.Add,
-                            contentDescription = "add",
-                            modifier = Modifier.size(30.dp)
-                        )
-                    }
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End){
+                IconButton(onClick = {  navHostController.navigate("view_notes")}) {
+                    Icon(imageVector = Icons.Filled.Edit, contentDescription = "notes")
                 }
             }
+            finalDisplay(navHostController)    /*displays previous tasks and add new task*/
         }
     }
 
     @Composable
     fun Display_dates() {
-        var present_date by remember { mutableStateOf(present_date) }
+        val context = LocalContext.current
+        var change_detected by remember { mutableStateOf(present_date) }
+        println("change_detected"+change_detected)
+        var list_dates by remember {
+            mutableStateOf(dates(present_date,present_month))
+        }
         Column {
             Row(
                 modifier = Modifier
@@ -401,12 +735,29 @@ class MainActivity : ComponentActivity() {
             ) {
                 IconButton(
                     onClick = {
-                        val present_date_1 = dates(present_date,present_month)[1].first
-                        present_month=getMonth_name(dates(present_date,present_month)[1].second)
-                        present_date=present_date_1
-                        viewModel.onChangingDates(present_date)
-                        viewModel.setHighlightValue(present_date)
-                              },
+                        index=index-1
+                        var present_date_1=0
+                        if(index>=0) {
+                            present_date_1 = list_dates[index].first
+                            viewModel.date_highlighted.value=present_date_1
+                            change_detected=present_date_1
+                        }
+                        if(index==-1){
+                            var proxy=list_dates
+                            present_date=dates(proxy[0].first,getMonth_name(proxy[0].second))[0].first
+                            present_month=getMonth_name(dates(proxy[0].first,getMonth_name(proxy[0].second))[0].second)
+                            proxy=dates(present_date,present_month)
+                            present_date=proxy[1].first
+                            present_month=getMonth_number(proxy[1].second)
+                            list_dates=dates(present_date,present_month)
+                            viewModel._dateChanging.value=present_date
+                            Log.i("MYTAG","dates1:"+list_dates)
+                            viewModel.date_highlighted.value=present_date
+                            change_detected=present_date
+                            viewModel._dateChanging.value=present_date
+                             index=2
+                        }
+                        },
                     modifier = Modifier
                         .size(24.dp)
                 ) {
@@ -415,14 +766,47 @@ class MainActivity : ComponentActivity() {
                         contentDescription = "Back"
                     )
                 }
-                Date_display(present = present_date,present_month)
+                Box {
+                    Column {
+                        LazyRow(horizontalArrangement = Arrangement.SpaceEvenly) {
+                            var count=0
+                            items(items = list_dates, itemContent = {
+                                Column {
+                                    spacing(index = count)
+                                    count++
+                                    FirstDisplayItem(int = it.first, onClick = {
+                                            Toast.makeText(context,"clicked on $it" , Toast.LENGTH_SHORT).show()
+                                             viewModel.date_highlighted.value=it.first
+                                            change_detected=it.first
+                                    }, change_detected,it.second)
+                                }
+                            })
+                        }
+                    }
+                }
                 IconButton(
                     onClick = {
-                        val present_date_1 = dates(present_date,present_month)[3].first
-                        present_month=getMonth_name(dates(present_date,present_month)[3].second)
-                        present_date=present_date_1
-                        viewModel.onChangingDates(present_date)
-                        viewModel.setHighlightValue(present_date)
+                        index=index+1
+                        var present_date_1=0
+                        if(index<=4) {
+                            present_date_1 = list_dates[index].first
+                            viewModel.date_highlighted.value=present_date_1
+                            change_detected=present_date_1
+                        }
+                        if(index==5){
+                            var proxy=list_dates
+                            present_date=dates(proxy[4].first,getMonth_name(proxy[4].second))[4].first
+                            present_month=getMonth_name(dates(proxy[4].first,getMonth_name(proxy[4].second))[4].second)
+                            proxy=dates(present_date,present_month)
+                            present_date=proxy[3].first
+                            present_month=getMonth_number(proxy[3].second)
+                            list_dates=dates(present_date,present_month)
+                            viewModel._dateChanging.value=present_date
+                            Log.i("MYTAG","dates2:"+list_dates)
+                            viewModel.date_highlighted.value=present_date
+                            change_detected=present_date
+                            index=2
+                        }
                     },
                     modifier = Modifier
                         .size(24.dp)
@@ -435,6 +819,24 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+    fun getMonth_number(s: String): Int {
+        return when (s) {
+            "January" -> 1
+            "February" -> 2
+            "March" -> 3
+            "April" -> 4
+            "May" -> 5
+            "June" -> 6
+            "July" -> 7
+            "August" -> 8
+            "September" -> 9
+            "October" -> 10
+            "November" -> 11
+            "December" -> 12
+            else -> throw IllegalArgumentException("Invalid month name: $s")
+        }
+    }
+
     fun getMonth_name(index: String) : Int{
         if(index=="January"){
             return 1
@@ -462,7 +864,6 @@ class MainActivity : ComponentActivity() {
         return 12
     }
     fun dates(date: Int,month:Int): MutableList<Pair<Int,String>> {    /*Weak Fix*/
-        println("present month:"+month)
         var dates: List<Int> = ArrayList()
         var month_names: List<Int> = ArrayList()
         var info : MutableList<Pair<Int,String>> = ArrayList()
@@ -536,43 +937,10 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
-        println("month names:"+month_names+" "+"dates: "+dates)
         for(i in 0..4){
             info.add(Pair(dates.get(i),DateFormatSymbols.getInstance().months[month_names.get(i)-1]))
         }
         return info
-    }
-    @Composable
-    fun Date_display(present: Int,present_month:Int) {
-        println("recomposed-1")
-        val dates = dates(present,present_month)
-        val context = LocalContext.current
-        var change_detected by remember { mutableStateOf(viewModel.date_highlighted.value) }
-        viewModel.date_highlighted.observe(this, Observer {
-                change_detected=it
-        })
-        println("date highlight:"+change_detected.toString())
-        Box {
-            Column {
-                LazyRow(horizontalArrangement = Arrangement.SpaceEvenly) {
-                    var count=0
-                    items(items = dates, itemContent = {
-                        Column {
-                             spacing(index = count)
-                             count++
-                             change_detected?.let { it1 ->
-                                 FirstDisplayItem(int = it.first, onClick = {
-                                    Toast.makeText(context,"clicked on $it" , Toast.LENGTH_SHORT).show()
-                                    change_detected=it.first
-                                    viewModel.setHighlightValue(it.first)
-                                    viewModel.onChangingDates(it.first)
-                                }, it1,it.second)
-                            }
-                        }
-                    })
-                }
-            }
-        }
     }
     @Composable
     fun spacing(index: Int){
@@ -592,103 +960,145 @@ class MainActivity : ComponentActivity() {
             }
             Spacer(modifier = Modifier.height((10 * space).dp))
         }
+
     }
-     @Composable
-     fun TaskStructure1(task_description: String, check: Boolean, task_heading: String) {
-        var complete by remember { mutableStateOf(check) }
-        var editedDescription =task_description
-        var editedHeading = task_heading
-        Card(
+   @Composable
+   fun TaskStructure1(
+         task_description: String, check: Boolean, task_heading: String,
+         dayEntitiy: DayEntitiy,
+         index: Int,
+         onClick: () -> Unit
+     ){
+         val editedDescription =task_description
+         val editedHeading = task_heading
+         Card(
             modifier = Modifier
                 .fillMaxWidth()
                 .wrapContentHeight(align = Alignment.CenterVertically)
                 .padding(10.dp)
+                .background(Color.Blue)
         ) {
-            Row(modifier = Modifier.padding(10.dp)) {
+             Row(modifier = Modifier.padding(10.dp)) {
                 Checkbox(
-                    checked =complete,
+                    checked =check,
                     onCheckedChange = {
-                        complete=it
+                         viewModel.change(dayEntitiy,index,it)
+                         onClick()
                     },
                     modifier = Modifier.align(Alignment.CenterVertically)
                 )
                 Spacer(modifier = Modifier.width(10.dp))
                 Column(modifier = Modifier.wrapContentSize()) {
-                    BasicTextField(
-                        value = editedHeading,
-                        onValueChange = { editedHeading = it },
-                        textStyle = TextStyle(
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 16.sp,
-                            textAlign = TextAlign.Center,
-                            color = Color.White
-                        ),
+                    Text(
+                        text = editedHeading,
+                        textAlign = TextAlign.Start,
                         modifier = Modifier
                             .wrapContentSize()
-                            .padding(4.dp)
+                            .padding(4.dp),
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.Black
                     )
                     Spacer(modifier = Modifier.height(8.dp))
-                    BasicTextField(
-                        value = editedDescription,
-                        onValueChange = { editedDescription = it },
-                        textStyle = TextStyle(
-                            fontWeight = FontWeight.Normal,
-                            fontSize = 10.sp,
-                            textAlign = TextAlign.Start,
-                            color = Color.White
-                        ),
+                    Text(
+                        text = editedDescription,
+                        textAlign = TextAlign.Start,
                         modifier = Modifier
-                            .wrapContentSize(align = Alignment.Center)
-                            .padding(4.dp)
+                            .wrapContentSize()
+                            .padding(4.dp),
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.Black
                     )
+                }
+                Row(modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(10.dp), horizontalArrangement = Arrangement.End) {
+                    IconButton(
+                        onClick = {
+                           onClick()
+                           viewModel.delete_task(dayEntitiy, index)
+                        },
+                        modifier = Modifier
+                            .size(24.dp)
+                    ) {
+                        Icon(
+                            Icons.Filled.Delete,
+                            contentDescription = "Delete" 
+                        )
+                    }
                 }
             }
         }
      }
      @Composable
-    fun finalDisplay(){
-        var date_change by remember { mutableStateOf( viewModel._dateChanging.value)}
-            viewModel._dateChanging.observe(this, Observer {
+    fun finalDisplay(navHostController: NavHostController){
+        var date_change by remember { mutableStateOf( present_date)}
+            viewModel.date_highlighted.observe(this, Observer {
             date_change=it
+            viewModel.set_date_changed_1(true)
+            println("date ki data:"+it)
         })
-        Column(modifier = Modifier.fillMaxWidth().fillMaxHeight(0.8f).padding(10.dp)){
-            println("recmposedd")
+        Column(modifier = Modifier
+            .fillMaxWidth()){
+            println("date changed")
             date_change?.let {
-                displayTaskView(date = it, month =present_month )
+                displayTaskView(date = it, month =present_month,navHostController,true)
             }
         }
     }
     @Composable
-    fun displayTaskView(date :Int,month: Int){
-        var entity1 by remember{ mutableStateOf(viewModel.retrieveDayTasks(date,month).value) }
-        viewModel.retrieveDayTasks(date,month).observe(this, Observer {
-             entity1=it
-            println("data of highlighted:"+it.toString())
-        })
-        if(entity1==null){
-            Card(modifier = Modifier
-                .fillMaxWidth()
-                .padding(10.dp),) {
+    fun displayTaskView(date :Int,month: Int,navHostController: NavHostController,check: Boolean){
+        var entity1 by remember{ mutableStateOf(viewModel.get_entitiy()) }
+        try {
+            viewModel.retrieveDayTasks(date, month).observe(this, Observer {
+                viewModel.set_entity(it)
+                if(it!=null){
+                   entity1=it
+                }else{
+                    if(viewModel.get_date_chaged1()){
+                        entity1=null
+                        viewModel.set_date_changed_1(false)
+                    }
+                }
+                println("data of highlighted:" + it+date+" "+month)
+                })
+        }catch (e:  RuntimeException){
+            println("error occurred")
+        }
+        var change by remember { mutableStateOf(false) } /* aimed to recompose if any Task gets deleted*/
+        Card (modifier = Modifier
+            .fillMaxWidth()
+            .clickable {
+                navHostController.navigate("floating")
+            }
+            .padding(10.dp)){
+            Text(text = "Work To-Dos", color = Color.Blue, fontWeight = FontWeight.Bold, fontSize = 25.sp, modifier = Modifier.padding(10.dp))
+            if (entity1 == null || entity1!!.tasksList.size == 0) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
                         text = "No tasks present!!",
                         fontWeight = FontWeight.Bold,
                         textAlign = TextAlign.Center,
-                        color = Color.Blue,
-                        fontSize = 25.sp,
+                        fontSize = 20.sp,
                         modifier = Modifier.padding(10.dp)
                     )
                     Text(
-                        text = "\n\nAdd tasks by clicking on the Add New Task button",
+                        text = "Add tasks by clicking",
                         fontWeight = FontWeight.Normal,
                         textAlign = TextAlign.Center,
-                        color = Color.Black,
-                        fontSize = 20.sp
+                        fontSize = 15.sp,
+                        modifier = Modifier.padding(10.dp)
                     )
                 }
-                }
+            }
+            entity1?.let {
+                change = showDailyTask(entitiy = it)
+            }
         }
-        entity1?.let { showDailyTask(entitiy = it) }
+        Column(modifier = Modifier.fillMaxHeight(), verticalArrangement = Arrangement.Bottom) {
+            add_on()
+        }
     }
     @Composable
     fun FirstDisplayItem(int: Int, onClick: () -> Unit,whomToHighlight : Int,month :String) {
@@ -728,16 +1138,33 @@ class MainActivity : ComponentActivity() {
         }
     }
     @Composable
-    fun showDailyTask(entitiy: DayEntitiy){
-        val tasklist =entitiy.tasksList
-        LazyColumn {
-            items(items = tasklist, itemContent = {
-                TaskStructure1(task_description = it.description, check = it.complete, task_heading = it.heading)
-                Spacer(modifier = Modifier
-                    .fillMaxWidth()
-                    .height(15.dp))
-            })
+    fun showDailyTask(entitiy: DayEntitiy) : Boolean{
+         val tasklist =entitiy.tasksList
+         var change by remember { mutableStateOf(false) }
+         println("recomposed-3")
+         LazyColumn(modifier = Modifier.padding(10.dp)) {
+             var count=0
+             if (tasklist.size > 0) {
+                 items(items = tasklist) {
+                     TaskStructure1(
+                        task_description = it.description,
+                        check = it.complete,
+                        task_heading = it.heading,
+                         entitiy,
+                         count
+                    ) {
+                         change = !change
+                    }
+                    Spacer(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(15.dp)
+                    )
+                 count++
+                 }
+            }
         }
+    return  change
     }
     fun getTodayMonthDate(): Pair<Int, Int> {
         val date_month = LocalDateTime.now().dayOfMonth
@@ -746,8 +1173,8 @@ class MainActivity : ComponentActivity() {
         return Pair(date_month, month)
     }
     fun show_count(){
-        viewModel.all_days.observe(this, Observer {
-            println("size of saved entities: "+it.size+" "+it.toString())
-        })
+        viewModel.all_days.observe(this) {
+            println("size of saved entities: " + it.size + " " + it.toString())
+        }
     }
 }

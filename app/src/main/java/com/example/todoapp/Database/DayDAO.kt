@@ -21,4 +21,5 @@ interface DayDAO {
      fun getEntityById(key: Int): LiveData<DayEntitiy>
     @Query("DELETE FROM DAYDATABASE")
     suspend fun deleteAllSubscribers()
+
 }

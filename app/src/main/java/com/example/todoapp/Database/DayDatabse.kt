@@ -6,7 +6,7 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
 
-@Database(entities = [DayEntitiy::class], version = 1)
+@Database(entities = [DayEntitiy::class], version = 1, exportSchema = true )
 @TypeConverters(Converters::class)
 abstract class DayDatabse :RoomDatabase(){
     abstract val dao: DayDAO
@@ -21,7 +21,7 @@ abstract class DayDatabse :RoomDatabase(){
                         context.applicationContext,
                         DayDatabse::class.java,
                         "Day_data_database"
-                    ).build()
+                    ).fallbackToDestructiveMigration().build()
                     INSTANCE=instance
                 }
                 return  instance
