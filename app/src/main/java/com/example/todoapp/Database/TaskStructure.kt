@@ -1,5 +1,8 @@
 package com.example.todoapp.Database
 
+import kotlinx.serialization.Serializable
+
+@Serializable
 data class TaskStructure (
     val heading : String,
     val description : String,

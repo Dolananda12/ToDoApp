@@ -5,6 +5,7 @@ import com.google.gson.reflect.TypeToken
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.provider.ContactsContract.CommonDataKinds.Note
 import java.io.ByteArrayOutputStream
 import java.util.Base64
 
@@ -18,6 +19,16 @@ class Converters {
     @TypeConverter
     fun toTaskStructureList(taskStructureListString: String): MutableList<TaskStructure> {
         val type = object : TypeToken<MutableList<TaskStructure>>() {}.type
+        return gson.fromJson(taskStructureListString, type)
+    }
+    @TypeConverter
+    fun fromNoteStructure(taskStructureList: NoteStructure): String {
+        return gson.toJson(taskStructureList)
+    }
+
+    @TypeConverter
+    fun toNoteStructure(taskStructureListString: String): NoteStructure {
+        val type = object : TypeToken<NoteStructure>() {}.type
         return gson.fromJson(taskStructureListString, type)
     }
      @TypeConverter

@@ -8,11 +8,11 @@ class Repository (private val dao: DayDAO){
 
     suspend fun insertDay(entitiy: DayEntitiy):Boolean{
            dao.insertDay(entitiy)
-        println("inserted successfully")
+        println("inserted successfully:"+entitiy)
         return true
     }
     suspend fun updateDay(entitiy: DayEntitiy){
-        println("updating!")
+        println("updating!"+entitiy)
         dao.updateDay(entitiy)
     }
     suspend fun deleteDay(entitiy: DayEntitiy){

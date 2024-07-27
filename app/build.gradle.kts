@@ -2,6 +2,7 @@ plugins {
     id("kotlin-kapt")
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+    kotlin("plugin.serialization") version "2.0.0"
 }
 
 android {
@@ -52,10 +53,13 @@ android {
 
 dependencies {
     implementation("androidx.compose.material3:material3-android:1.2.1")
+    implementation("androidx.lifecycle:lifecycle-livedata-ktx:2.8.2")
+    implementation("androidx.navigation:navigation-compose:2.7.0-rc01")
     val room_version = "2.6.1"
     val nav_version = "2.7.7"
     implementation("androidx.navigation:navigation-compose:$nav_version")
     implementation("androidx.room:room-runtime:$room_version")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
     implementation("androidx.room:room-ktx:$room_version")
     kapt("androidx.room:room-compiler:$room_version")
     implementation("androidx.core:core-ktx:1.13.1")
