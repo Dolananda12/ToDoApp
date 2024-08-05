@@ -1,6 +1,7 @@
 import android.content.Context
 import android.graphics.BitmapFactory
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Icon
@@ -27,10 +28,13 @@ data class BottomNavigationItem(
                 route = Screens.Home.route
             ),
             BottomNavigationItem(
-                label = "Plan",
-                icon= ImageVector.vectorResource(id = R.drawable.plan),
+                label = "Notes",
+                icon= Icons.Filled.Edit,
                 route = Screens.Plan.route
             )
         )
     }
 }
+/*
+
+icon= ImageVector.vectorResource(id = R.drawable.plan),*/

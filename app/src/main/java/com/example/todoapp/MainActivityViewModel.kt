@@ -46,10 +46,12 @@ class MainActivityViewModel(private val repository: Repository,private val notes
     var month_highlighted=0
     var updating = false
     var pop = false
+    var calender_clicked =false
     var link : MutableList<String> = ArrayList()
    var photo : MutableList<String> = ArrayList()
    var pay : MutableList<Pair<String,String>> = ArrayList()
    var heading =""
+    var dates : MutableList<Pair<Int,String>> =ArrayList()
    var description = ""
     val notes = notesRepository.tasks
     var index=0

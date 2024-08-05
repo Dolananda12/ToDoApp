@@ -3,7 +3,6 @@ import BottomNavigationItem
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import androidx.compose.foundation.Canvas
 import android.graphics.ImageDecoder
 import android.net.Uri
 import android.os.Build
@@ -16,7 +15,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.RequiresApi
-import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -48,6 +47,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -68,6 +68,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
+import androidx.compose.material3.rememberStandardBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.MovableContent
 import androidx.compose.runtime.getValue
@@ -114,12 +115,18 @@ import com.example.todoapp.Database.Notes_Repository
 import com.example.todoapp.Database.Repository
 import com.example.todoapp.Database.TaskStructure
 import com.google.gson.Gson
-import kotlinx.coroutines.DelicateCoroutinesApi
 import java.io.ByteArrayOutputStream
 import java.text.DateFormatSymbols
+import java.time.LocalDate
 import java.time.LocalDateTime
 import java.util.Base64
 import kotlin.io.encoding.ExperimentalEncodingApi
+import com.maxkeppeker.sheets.core.models.base.UseCaseState
+import com.maxkeppeker.sheets.core.models.base.rememberUseCaseState
+import com.maxkeppeler.sheets.calendar.CalendarDialog
+import com.maxkeppeler.sheets.calendar.models.CalendarConfig
+import com.maxkeppeler.sheets.calendar.models.CalendarSelection
+import com.maxkeppeler.sheets.calendar.models.CalendarStyle
 
 class MainActivity : ComponentActivity() {
     var index=2
@@ -136,6 +143,7 @@ class MainActivity : ComponentActivity() {
         val factory = ViewModelFactory(repository = repository,repository2)
         viewModel = ViewModelProvider(this, factory)[MainActivityViewModel::class.java]
         viewModel.init()
+        viewModel.set_date_changed_1(true)
         setContent {
             BottomNavigationBar()
         }
@@ -146,10 +154,6 @@ class MainActivity : ComponentActivity() {
         var navigationSelectedItem by remember {
             mutableStateOf(0)
         }
-        /**
-         * by using the rememberNavController()
-         * we can get the instance of the navController
-         */
         val navController = rememberNavController()
         Scaffold(
             modifier = Modifier.fillMaxSize(),
@@ -171,7 +175,6 @@ class MainActivity : ComponentActivity() {
                             },
                             onClick = {
                                 navigationSelectedItem = index
-                                
                                 navController.navigate(navigationItem.route) {
                                     popUpTo(navController.graph.findStartDestination().id) {
                                         saveState = true
@@ -193,8 +196,11 @@ class MainActivity : ComponentActivity() {
                 composable(Screens.Home.route) {
                     View1(navController)
                 }
+                composable("home"){
+                    View1(navHostController = navController)
+                }
                 composable(Screens.Plan.route) {
-                     Project_Window()
+                    View_Notes(navController)
                 }
                 composable("floating/{mode}") {
                     var mode : Boolean? = false
@@ -216,31 +222,6 @@ class MainActivity : ComponentActivity() {
                     val noteJson = backStackEntry.arguments?.getString("note")
                     val noteStructure = Gson().fromJson(noteJson, NoteStructure::class.java)
                     Write_Notes(navController, noteStructure)
-                }
-            }
-        }
-    }
-    @Composable
-    fun Project_Window(){
-        Column(modifier = Modifier.fillMaxSize()){
-            Row(modifier = Modifier
-                .fillMaxWidth()
-                .padding(10.dp)){
-                Text(text = "Projects:", modifier = Modifier.padding(10.dp),Color.Red, fontWeight = FontWeight.Bold, fontSize = 10.sp, textAlign = TextAlign.Center)
-            }
-            //VIEW OF PROJECTS INCLUDE RANDOM PROJECT COLORS
-            Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.Bottom){
-                Row(modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(10.dp), horizontalArrangement = Arrangement.End){
-                    //Add
-                    Box(modifier = Modifier
-                        .size(24.dp)
-                        .border(BorderStroke(1.dp, Color.Blue), shape = CircleShape)){
-                        IconButton(onClick = { /*TODO*/ }) {
-                            Icon(Icons.Filled.Add, contentDescription = "Add a Project")
-                        }
-                    }
                 }
             }
         }
@@ -487,6 +468,31 @@ class MainActivity : ComponentActivity() {
            }
        }
     }
+    @OptIn(ExperimentalMaterial3Api::class)
+    @Composable
+    fun showCalender(closeSelection: UseCaseState.() -> Unit,navHostController: NavHostController){
+        val localDate=LocalDate.of(2025,viewModel.month_highlighted,viewModel.date_higlighted)
+
+        CalendarDialog(
+            state = rememberUseCaseState(visible = true, onCloseRequest = {
+                closeSelection() }),
+            config = CalendarConfig(
+                yearSelection = true,
+                monthSelection = true,
+                style = CalendarStyle.MONTH,
+                disabledDates = listOf(localDate)
+            ),
+            selection = CalendarSelection.Date { newDate ->
+                viewModel.calender_clicked=true
+                viewModel.date_highlighted.value=newDate.dayOfMonth
+                viewModel.month_highlighted=newDate.monthValue
+                viewModel.date_higlighted=newDate.dayOfMonth
+                println("date calendar:"+viewModel.month_highlighted)
+                viewModel.dates=dates(viewModel.date_higlighted,viewModel.month_highlighted)
+                navHostController.navigate("home")
+            }
+        )
+    }
     @Composable
     fun LinkCardView(title: String,mode : Boolean,link3 : MutableList<String>){
         var expandable by remember { mutableStateOf(false) }
@@ -592,7 +598,7 @@ class MainActivity : ComponentActivity() {
                         if (clicked) {
                             link.add(s)
                             viewModel.set_link(link)
-                            clicked = false
+                           clicked = false
                         }
                         s = ""
                     }
@@ -1018,11 +1024,13 @@ class MainActivity : ComponentActivity() {
                     horizontalArrangement = Arrangement.End
                 ) {
                     Button(onClick = {
+                        println("month highlighted:"+viewModel.month_highlighted+" "+"date:"+viewModel.date_higlighted)
                         viewModel.insertDayTasks(viewModel.month_highlighted,viewModel.date_higlighted).observe(this@MainActivity,Observer{
                             if(it==true){
                                 Toast.makeText(context, "saved", Toast.LENGTH_SHORT).show()
                                 navHostController.popBackStack()
                                 viewModel.reset_tasks()
+                                viewModel.set_date_changed_1(true)
                                 viewModel.reset()
                             }else{
                                 Toast.makeText(context, "saving..", Toast.LENGTH_SHORT).show()
@@ -1077,7 +1085,7 @@ class MainActivity : ComponentActivity() {
     fun View1(navHostController: NavHostController) {    /*displays the home screen doesn't get recomposed but its child functions do*/
         var date_change by rememberSaveable { mutableStateOf(viewModel._dateChanging.value) }
         viewModel.present_date= viewModel._dateChanging.value!!
-        viewModel._dateChanging.observe(this, Observer {
+        viewModel.date_highlighted.observe(this, Observer {
             println("present date:" + it.toString())
             date_change = it
         })
@@ -1092,11 +1100,21 @@ class MainActivity : ComponentActivity() {
     @Composable
     fun Display_dates() {
         val context = LocalContext.current
-        var change_detected by rememberSaveable { mutableStateOf(viewModel.present_date) }
+        var change_detected by rememberSaveable { mutableStateOf(viewModel.date_higlighted) }
         println("change_detected"+change_detected)
         var list_dates by rememberSaveable {
-            mutableStateOf(dates(viewModel.present_date,viewModel.present_month))
+            mutableStateOf(dates(viewModel.date_higlighted,viewModel.month_highlighted))
         }
+        viewModel.date_highlighted.observe(this,Observer{
+            println("display dates:"+it)
+            if(viewModel.dates.size>0){
+                change_detected = it
+                list_dates = viewModel.dates
+                println("dates:" + list_dates)
+                viewModel.calender_clicked = false
+                viewModel.dates=ArrayList()
+            }
+        })
         Column {
             Row(
                 modifier = Modifier
@@ -1152,6 +1170,8 @@ class MainActivity : ComponentActivity() {
                                         viewModel.date_highlighted.value=it.first
                                         change_detected=it.first
                                         viewModel.month_highlighted=getMonth_number(it.second)
+                                        viewModel.date_higlighted=it.first
+                                        viewModel.set_date_changed_1(true)
                                         Log.i("MYTAG","highlighted:"+viewModel.month_highlighted+" "+viewModel.date_higlighted)
                                     }, change_detected,it.second,count)
                                     count++
@@ -1259,6 +1279,7 @@ class MainActivity : ComponentActivity() {
         return 12
     }
     fun dates(date: Int,month:Int): MutableList<Pair<Int,String>> {    /*Weak Fix*/
+        println("generating dates for:"+date+" "+month)
         var dates: List<Int> = ArrayList()
         var month_names: List<Int> = ArrayList()
         var info : MutableList<Pair<Int,String>> = ArrayList()
@@ -1440,7 +1461,7 @@ class MainActivity : ComponentActivity() {
     }
     @Composable
     fun finalDisplay(navHostController: NavHostController){
-        var date_change by rememberSaveable { mutableStateOf(viewModel.present_date)}
+        var date_change by rememberSaveable { mutableStateOf(viewModel.date_higlighted)}
         viewModel.date_highlighted.observe(this, Observer {
             if(it!=date_change){
                 date_change=it
@@ -1461,21 +1482,24 @@ class MainActivity : ComponentActivity() {
         var mode by remember {
             mutableStateOf(false)
         }
-        println("dolananda")
         try {
             viewModel.retrieveDayTasks(viewModel.date_higlighted, viewModel.month_highlighted)
                 .observe(this, Observer { it ->
                     println("change:"+viewModel.get_date_chaged1())
+                    println("printing:"+entity1+it)
+                    println("retreiving tasks for:"+viewModel.month_highlighted)
                     if (viewModel.get_date_chaged1()) {
-                        entity1 = null
+                        println("true entered")
+                        entity1 = it
                         viewModel.set_date_changed_1(false)
+                        viewModel.set_entity(entity1)
                     }
-                    else if((it!=viewModel.get_entitiy())&&(!viewModel.updating)&&(it.id==(viewModel.date_higlighted+100*viewModel.month_highlighted))) {
-                            println("diff"+viewModel.get_entitiy()+" "+it)
-                            viewModel.set_entity(it)
-                            if (it != null) {
+                    else if(entity1!=null&&it!=null) {
+                            if((it!=viewModel.get_entitiy())&&(!viewModel.updating)&&(it.id==(viewModel.date_higlighted+100*viewModel.month_highlighted))) {
+                                println("diff" + viewModel.get_entitiy() + " " + it)
+                                viewModel.set_entity(it)
                                 entity1 = it
-                                mode=!mode
+                                mode = !mode
                             }
                         }else{
                             println("same:"+entity1)
@@ -1489,6 +1513,9 @@ class MainActivity : ComponentActivity() {
         var clicked by remember {
             mutableStateOf(false)
         }
+        var showCalender by remember {
+            mutableStateOf(false)
+        }
         Column (modifier = Modifier
             .fillMaxWidth()){
             println("recomposed at taskview:"+entity1)
@@ -1498,11 +1525,16 @@ class MainActivity : ComponentActivity() {
                     .fillMaxWidth()
                     .padding(10.dp), horizontalArrangement = Arrangement.End){
                     IconButton(onClick = {
-                        navHostController.navigate("view_notes")
+                        showCalender=true
                     }) {
-                        Icon(imageVector = Icons.Filled.Edit, contentDescription = "notes")
+                        Icon(imageVector = Icons.Filled.DateRange, contentDescription = "calendar")
                     }
                 }
+            }
+            if(showCalender){
+                showCalender({
+                    showCalender=false
+                },navHostController)
             }
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text(text = "Work To-Dos", color = Color.Blue, fontWeight = FontWeight.Bold, fontSize = 25.sp, modifier = Modifier.padding(10.dp))
@@ -1721,7 +1753,7 @@ class MainActivity : ComponentActivity() {
           if(n>0)
               borderPercentage= (count.toFloat()/n.toFloat())*100
               Log.i("MYTAG",count.toString()+" "+n.toString()+" "+borderPercentage.toString())
-        }
+          }
         if(borderPercentage>=0&&borderPercentage<20){
               color=Color(resources.getColor(R.color.red_2))
         }
