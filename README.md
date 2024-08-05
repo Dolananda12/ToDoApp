@@ -1,5 +1,11 @@
-# ToDoApplication
-Application where users can add tasks and he will be reminded about the task via notification, the Add Task fragment is what makes it special as u can add links, description and more. The Application aims to segregate undone tasks to help you plan your day better.
+ ![TodoApp_2](https://github.com/user-attachments/assets/31d55f33-f97e-4854-ba86-833650077b9c)
+![TodoApp_3](https://github.com/user-attachments/assets/5d08c77b-2c2d-4702-8032-adb466e29e93)
+![TodoApp_1](https://github.com/user-attachments/assets/74843dee-093c-448f-b4f6-13b8c1e5232c)
 
-[TodoApp_4](https://github.com/user-attachments/assets/2955656f-ea6a-48ef-a1a2-7d4b4950ec45)
-[TodoApp_5](https://github.com/user-attachments/assets/f42adceb-9b58-4696-b465-320239c00ba2)
+
+https://github.com/user-attachments/assets/274cdeb3-7f4b-40cb-ba69-42b03803f26f
+
+
+
+https://github.com/user-attachments/assets/68e33407-bbc8-40ea-8002-599c94371182
+
