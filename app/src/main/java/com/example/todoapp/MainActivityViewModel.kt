@@ -1,47 +1,59 @@
 package com.example.todoapp
-
 import android.content.Context
-import android.content.Entity
 import android.database.SQLException
 import android.database.sqlite.SQLiteConstraintException
 import android.database.sqlite.SQLiteException
-import android.graphics.Bitmap
-import android.provider.ContactsContract.CommonDataKinds.Note
 import android.util.Log
 import android.widget.Toast
-import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
-import androidx.lifecycle.Observer
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.work.Constraints
+import androidx.work.Data
+import androidx.work.NetworkType
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkManager
+import com.example.NotificationDetail
 import com.example.todoapp.Database.DayEntitiy
 import com.example.todoapp.Database.NoteStructure
 import com.example.todoapp.Database.NotesEntitiy
 import com.example.todoapp.Database.Notes_Repository
 import com.example.todoapp.Database.Repository
 import com.example.todoapp.Database.TaskStructure
+import com.example.todoapp.Database.TokenEntity
+import com.example.todoapp.Database.TokenRepository
+import com.example.todoapp.Notificaiton.ScheduleNotificationsWorker
+import com.example.todoapp.Notificaiton.SchedulerObject
+import com.example.todoapp.Notificaiton.SendTaskWorker
+import com.example.todoapp.Notificaiton.getNotficationData
+import com.example.todoapp.Notificaiton.storeNotificationData
+import com.google.firebase.messaging.FirebaseMessaging
+import com.google.gson.GsonBuilder
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
+import kotlinx.serialization.json.Json
 import java.time.LocalDateTime
 
-class MainActivityViewModel(private val repository: Repository,private val notesRepository: Notes_Repository) : ViewModel() {
+class MainActivityViewModel(private val repository: Repository,private val notesRepository: Notes_Repository,private val tokenRepository: TokenRepository) : ViewModel() {
     var dayEntitiy: DayEntitiy? = null
    var date_chaned=false
     var present_date_1=0
     var mode=false
     var present_date =0
     var present_month =0
+    var list : MutableList<TaskStructure> = ArrayList()
     var present_month_1=0
+    var selected_time_hour : Int? = null
+    var selected_time_min   : Int? = null
     var date_higlighted=0
     var month_highlighted=0
     var updating = false
@@ -58,9 +70,9 @@ class MainActivityViewModel(private val repository: Repository,private val notes
    val all_days = repository.tasks
    val _dateChanging = MutableLiveData<Int>().apply { value = LocalDateTime.now().dayOfMonth }
    var date_highlighted = MutableLiveData<Int>()
-    var taskStructureForDisplay = TaskStructure("","",false,ArrayList(),ArrayList(),ArrayList())
+    var taskStructureForDisplay = TaskStructure("","",false,ArrayList(),ArrayList(),ArrayList(),-1,-1)
     fun reset_tasks(){
-        taskStructureForDisplay =TaskStructure("","",false,ArrayList(),ArrayList(),ArrayList())
+        taskStructureForDisplay =TaskStructure("","",false,ArrayList(),ArrayList(),ArrayList(),-1,-1)
     }
     fun init(){
         present_date = getTodayMonthDate().first
@@ -84,6 +96,30 @@ class MainActivityViewModel(private val repository: Repository,private val notes
     fun get_date_chaged1():Boolean{
         return this.date_chaned
     }
+    var token : String = ""
+    private suspend fun getToken(): String {
+        val tokenRetrieved = CompletableDeferred<String>("")
+        tokenRepository.token.observeForever { tokenList ->
+            if (tokenList != null) {
+                token = tokenList[0].token
+                tokenRetrieved.complete(token)
+                Log.i("MYTAG", "Token is12: $token")
+            }
+        }
+        return tokenRetrieved.await()
+    }
+    fun insertToken(context: Context){
+        viewModelScope.launch {
+            try {
+                val token= FirebaseMessaging.getInstance().token.await()
+                println("token is $token")
+                tokenRepository.insert(TokenEntity(0,token.toString()))
+            }catch (e : Exception){
+                e.printStackTrace()
+                Toast.makeText(context, "$e", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
    fun get_entitiy():DayEntitiy?{
        return this.dayEntitiy
    }
@@ -94,6 +130,74 @@ class MainActivityViewModel(private val repository: Repository,private val notes
   fun set_link(list : MutableList<String>){
       Log.i("MYTAG","1:"+list.toString())
       link=list
+  }
+  fun setOFF_scheduler(entitiy: DayEntitiy,context: Context){
+     viewModelScope.launch {
+         val tasklist = entitiy.tasksList
+         println("1:$tasklist")
+         println("2:$list")
+         if (tasklist.size > 0 && tasklist != list) {
+             var index = -1
+             var t = -1
+             val h =  LocalDateTime.now().minute +1000*LocalDateTime.now().hour
+             for (i in 0..<tasklist.size) {
+                 val t_i = 1000 * tasklist[i].timeHour + tasklist[i].timeMin
+                 println("value is 2:$h")
+                 if (t_i >=h) {
+                     t = t_i
+                     index = i
+                 }
+             }
+             for (i in 0..<tasklist.size) {
+                 val t_i = 1000 * tasklist[i].timeHour + tasklist[i].timeMin
+                 if (t_i >=h && t >=t_i) {
+                     t = t_i
+                     index = i
+                 }
+             }
+             println("index is:$index")
+             if (index != -1) {
+                 if(tasklist[index]!= getNotficationData(context)!!.task) {
+                     println("scheduling notification for:${tasklist[index]}")
+                     val oneTimeWorkRequest =
+                         OneTimeWorkRequestBuilder<ScheduleNotificationsWorker>().setConstraints(
+                             Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED)
+                                 .build()
+                         ).build()
+                     WorkManager.getInstance(context).enqueue(oneTimeWorkRequest)
+                     list = tasklist
+                     storeNotificationData(
+                         context, Json.encodeToString(
+                             SchedulerObject.serializer(), SchedulerObject(
+                                 tasklist[index].timeHour, tasklist[index].timeMin,
+                                 tasklist[index]
+                             )
+                         )
+                     )
+                 }else{
+                     println("duplicate 2")
+                 }
+             } else {
+                 println("duplicate")
+             }
+         }else{
+             println("schedulable tasks not present")
+         }
+     }
+  }
+  fun renderRequest(entitiy: DayEntitiy,context: Context){
+     CoroutineScope(Dispatchers.Main).launch {
+         val token_1 = async {
+             getToken()
+         }.await()
+         val notification = NotificationDetail(entitiy.tasksList.toMutableList(),token,"Hi")
+         val notification_Json = GsonBuilder().create().toJson(notification).toString()
+         val taskdata = Data.Builder().putString("Notification",notification_Json)
+             .build()
+         val oneTimeRequest = OneTimeWorkRequestBuilder<SendTaskWorker>().setInputData(taskdata)
+             .build()
+         WorkManager.getInstance(context).enqueue(oneTimeRequest)
+     }
   }
   fun set_pay(list : MutableList<Pair<String,String>>){
       Log.i("MYTAG","2"+list.toString())
@@ -112,7 +216,7 @@ class MainActivityViewModel(private val repository: Repository,private val notes
       description=list
   }
   fun insertDayTasks(month: Int,day: Int) : LiveData<Boolean>{
-      val task=TaskStructure(heading,description,false,photo,link,pay)
+      val task=TaskStructure(heading,description,false,photo,link,pay,selected_time_min!!,selected_time_hour!!)
       val done= MutableLiveData<Boolean>(false)
         val key = day + 100*month
         val entitiy =  dayEntitiy
@@ -121,7 +225,7 @@ class MainActivityViewModel(private val repository: Repository,private val notes
           println("insert:1")
           val tasks = entitiy.tasksList
             viewModelScope.launch {
-                 if(mode){
+                if(mode){
                      tasks[index]=task
                      entitiy.tasksList=tasks
                      index=0
@@ -145,6 +249,7 @@ class MainActivityViewModel(private val repository: Repository,private val notes
                          }
                      }.catch { e ->
                          done.value=false
+                         delete_task_error(entitiy)
                          e.printStackTrace()
                      }.collect()
                  }
@@ -211,6 +316,7 @@ class MainActivityViewModel(private val repository: Repository,private val notes
                     cause.printStackTrace()
                 }
             }.catch { e ->
+                delete_task_error(entitiy)
                 a.value=false
                 e.printStackTrace()
             }.collect()
@@ -343,6 +449,11 @@ class MainActivityViewModel(private val repository: Repository,private val notes
                 dayEntitiy.tasksList = tasks
                 repository.insertDay(dayEntitiy)
             }
+        }
+    }
+    fun delete_task_error(dayEntitiy: DayEntitiy){
+        viewModelScope.launch {
+            repository.deleteDay(entitiy = dayEntitiy)
         }
     }
 }

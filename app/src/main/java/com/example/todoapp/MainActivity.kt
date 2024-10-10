@@ -1,5 +1,7 @@
 package com.example.todoapp
 import BottomNavigationItem
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -49,7 +51,6 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.KeyboardArrowRight
@@ -68,9 +69,11 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
-import androidx.compose.material3.rememberStandardBottomSheetState
+import androidx.compose.material3.TimePicker
+import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.MovableContent
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -84,7 +87,6 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -96,16 +98,17 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.Observer
 import androidx.lifecycle.ViewModelProvider
-import androidx.lifecycle.distinctUntilChanged
-import androidx.navigation.NavController
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
-import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
-import androidx.navigation.navArgs
-import androidx.navigation.navArgument
+import androidx.work.BackoffPolicy
+import androidx.work.Data
+import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.PeriodicWorkRequest
+import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.WorkManager
 import com.example.todoapp.Database.DayDatabse
 import com.example.todoapp.Database.DayEntitiy
 import com.example.todoapp.Database.NoteStructure
@@ -114,7 +117,12 @@ import com.example.todoapp.Database.NotesEntitiy
 import com.example.todoapp.Database.Notes_Repository
 import com.example.todoapp.Database.Repository
 import com.example.todoapp.Database.TaskStructure
+import com.example.todoapp.Database.TokenDatabase
+import com.example.todoapp.Database.TokenRepository
+import com.example.todoapp.Notificaiton.Constansts12
+import com.example.todoapp.Notificaiton.SendTaskWorker
 import com.google.gson.Gson
+import com.google.gson.GsonBuilder
 import java.io.ByteArrayOutputStream
 import java.text.DateFormatSymbols
 import java.time.LocalDate
@@ -127,6 +135,9 @@ import com.maxkeppeler.sheets.calendar.CalendarDialog
 import com.maxkeppeler.sheets.calendar.models.CalendarConfig
 import com.maxkeppeler.sheets.calendar.models.CalendarSelection
 import com.maxkeppeler.sheets.calendar.models.CalendarStyle
+import java.time.Duration
+import java.util.Calendar
+import java.util.concurrent.TimeUnit
 
 class MainActivity : ComponentActivity() {
     var index=2
@@ -140,14 +151,53 @@ class MainActivity : ComponentActivity() {
         val repository = Repository(dao)
         val dao2 = NotesDatabase.getInstance(application).dao
         val repository2 = Notes_Repository(dao2)
-        val factory = ViewModelFactory(repository = repository,repository2)
+        val dao3= TokenDatabase.getInstance(application).dao
+        val repository3= TokenRepository(dao3)
+        val factory = ViewModelFactory(repository = repository, repository2,repository3)
         viewModel = ViewModelProvider(this, factory)[MainActivityViewModel::class.java]
         viewModel.init()
         viewModel.set_date_changed_1(true)
         setContent {
-            BottomNavigationBar()
+
+            /*viewModel.insertToken(this)
+          */BottomNavigationBar()
+            /* viewModel.delete_task_error(DayEntitiy(viewModel.date_higlighted+100*viewModel.month_highlighted,ArrayList()))*/
+            show_count()
+            val permissionLauncher = rememberLauncherForActivityResult(
+                contract = ActivityResultContracts.RequestPermission(),
+                onResult = {
+                }
+            )
+            SideEffect {
+                permissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+            }
+            LaunchedEffect(key1 = true) {
+                val workRequest = PeriodicWorkRequestBuilder<IncompleteTaskWorker>(
+                    repeatInterval = 5,
+                    repeatIntervalTimeUnit = TimeUnit.HOURS
+                ).setBackoffCriteria(
+                    backoffPolicy = BackoffPolicy.LINEAR,
+                    duration = Duration.ofSeconds(15)
+                ).build()
+                val workManager = WorkManager.getInstance(applicationContext)
+                /*workManager.enqueueUniquePeriodicWork(
+                    "Unique",
+                    ExistingPeriodicWorkPolicy.KEEP,
+                    workRequest
+                )*/
+                workManager.enqueue(workRequest)
+            }
         }
-        show_count()
+        val notificationManager  = applicationContext.getSystemService(Context.NOTIFICATION_SERVICE)
+        createNotificationChannel(notificationManager as NotificationManager)
+    }
+    fun createNotificationChannel(notificationManager: NotificationManager){
+      val channel  = NotificationChannel(Constansts12.PUSH_NOTIFICATION_CHANNEL_ID,Constansts12
+          .PUSH_NOTIFICATION_CHANNEL_NAME,NotificationManager.IMPORTANCE_HIGH)
+          .apply {
+             enableLights(true)
+          }
+      notificationManager.createNotificationChannel(channel)
     }
     @Composable
     fun BottomNavigationBar() {
@@ -258,7 +308,7 @@ class MainActivity : ComponentActivity() {
                    var count = 0
                    items(notes) {
                      change=Display_notes(notes,navHostController,count)
-                       count++
+                     count++
                    }
                }
            }else{
@@ -396,25 +446,30 @@ class MainActivity : ComponentActivity() {
                    Save_action(onDismissRequest = {
                        clicked = false
                    }) {
-                       viewModel.insert_note(NoteStructure(it, heading, description), mode)
-                           .observe(this@MainActivity,
-                               Observer {
-                                   println("observing4"+it+" "+viewModel.pop.toString())
-                                   if (it == "true") {
-                                       clicked = false
-                                       if(viewModel.pop){
-                                           navHostController.popBackStack()
+                       try {
+                           viewModel.insert_note(NoteStructure(it, heading, description), mode)
+                               .observe(this@MainActivity,
+                                   Observer {
+                                       println("observing4" + it + " " + viewModel.pop.toString())
+                                       if (it == "true") {
+                                           clicked = false
+                                           if (viewModel.pop) {
+                                               navHostController.popBackStack()
+                                           }
+                                       } else if (it == "unique_key") {
+                                           Toast.makeText(
+                                               context,
+                                               "This name already exists!",
+                                               Toast.LENGTH_SHORT
+                                           ).show()
+                                           clicked = false
                                        }
-                                   } else if (it == "unique_key") {
-                                       Toast.makeText(
-                                           context,
-                                           "This name already exists!",
-                                           Toast.LENGTH_SHORT
-                                       ).show()
-                                       clicked = false
-                                   }
-                               })
+                                   })
+                       }catch (e : Exception){
+                           Toast.makeText( this@MainActivity,"unable to save", Toast.LENGTH_SHORT).show()
+                       }
                    }
+
                }else{
                    if (noteStructure != null) {
                        viewModel.insert_note(NoteStructure(filename,heading, description), mode).observe(this@MainActivity,
@@ -947,7 +1002,6 @@ class MainActivity : ComponentActivity() {
         if(decodeString!=null){
             val bitmap = BitmapFactory.decodeByteArray(decodeString,0,decodeString.size)
             Image(bitmap.asImageBitmap(), contentDescription = "selected photo", modifier = Modifier.size(100.dp), contentScale = ContentScale.Crop)
-
         }else{
             Text(text = "not able to display")
         }
@@ -957,6 +1011,12 @@ class MainActivity : ComponentActivity() {
         val context= LocalContext.current
         var heading =""
         var description = ""
+        var select_timepicker by remember {
+            mutableStateOf(false)
+        }
+        var time_selected_d by remember {
+            mutableStateOf("")
+        }
         var link1 : MutableList<String> = ArrayList()
         var photo2 : MutableList<String> = ArrayList()
         var pay3 : MutableList<Pair<String,String>> = ArrayList()
@@ -968,7 +1028,7 @@ class MainActivity : ComponentActivity() {
             pay3 = taskStructure.pay
             photo2 = taskStructure.photos
         }
-            Column(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(Color.White)
@@ -992,6 +1052,23 @@ class MainActivity : ComponentActivity() {
             var firstColumnHeight by remember {
                 mutableStateOf(0)
             }
+            Button(onClick = {
+               select_timepicker=true
+            }, modifier = Modifier.padding(10.dp)) {
+                Text(text = "Select Time", color = Color.Black, fontWeight = FontWeight.Bold, modifier = Modifier.padding(5.dp))
+            }
+            if(select_timepicker){
+                  FullScreenDialogExample(onDismissRequest = { select_timepicker=false}) {
+                      Card(modifier = Modifier.fillMaxWidth(),RoundedCornerShape(30.dp)){
+                      DisplayTimeDate(modifier = Modifier
+                          .fillMaxWidth()
+                          .padding(10.dp)) {
+                              Toast.makeText(this@MainActivity, "saved",Toast.LENGTH_SHORT).show()
+                              select_timepicker=false
+                          }
+                      }
+                  }
+            }
             Column(modifier = Modifier
                 .fillMaxSize()
                 .onGloballyPositioned { coordinates ->
@@ -1003,7 +1080,7 @@ class MainActivity : ComponentActivity() {
                     .padding(5.dp)
                     .heightIn(0.dp, (0.3f * firstColumnHeight).dp)
                     .verticalScroll(scrollState)
-                    .border(2.dp, Color.Black)
+                    .border(5.dp, Color.Black)
                 ) {
                     LinkCardView(title = "link",true,link1)
                     Spacer(
@@ -1025,17 +1102,39 @@ class MainActivity : ComponentActivity() {
                 ) {
                     Button(onClick = {
                         println("month highlighted:"+viewModel.month_highlighted+" "+"date:"+viewModel.date_higlighted)
-                        viewModel.insertDayTasks(viewModel.month_highlighted,viewModel.date_higlighted).observe(this@MainActivity,Observer{
-                            if(it==true){
-                                Toast.makeText(context, "saved", Toast.LENGTH_SHORT).show()
-                                navHostController.popBackStack()
-                                viewModel.reset_tasks()
-                                viewModel.set_date_changed_1(true)
-                                viewModel.reset()
-                            }else{
-                                Toast.makeText(context, "saving..", Toast.LENGTH_SHORT).show()
+                        if(viewModel.selected_time_hour!=null&&viewModel.selected_time_min!=null) {
+                            try {
+                                viewModel.insertDayTasks(
+                                    viewModel.month_highlighted,
+                                    viewModel.date_higlighted
+                                ).observe(this@MainActivity, Observer {
+                                    if (it == true) {
+                                        Toast.makeText(context, "saved", Toast.LENGTH_SHORT).show()
+                                        navHostController.popBackStack()
+                                        viewModel.reset_tasks()
+                                        viewModel.set_date_changed_1(true)
+                                        viewModel.reset()
+                                    } else {
+                                        Toast.makeText(context, "saving..", Toast.LENGTH_SHORT)
+                                            .show()
+                                    }
+                                })
+                            } catch (e: Exception) {
+                                Toast.makeText(
+                                    this@MainActivity,
+                                    "exception while saving!",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                                viewModel.delete_task_error(
+                                    DayEntitiy(
+                                        viewModel.date_higlighted + 100 * viewModel.month_highlighted,
+                                        ArrayList()
+                                    )
+                                )
                             }
-                        })
+                        }else{
+                            Toast.makeText(this@MainActivity,"please select time for task scheduling", Toast.LENGTH_SHORT).show()
+                        }
                     }) {
                         Text(text = "Save", modifier = Modifier.wrapContentSize())
                     }
@@ -1043,7 +1142,34 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
-
+    @OptIn(ExperimentalMaterial3Api::class)
+    @Composable
+    fun DisplayTimeDate(
+        modifier: Modifier,
+        onSelect: () -> Unit
+    ):String{
+        val d: MutableLiveData<String>
+        val currentTime = Calendar.getInstance()
+        val timePickerState = rememberTimePickerState(
+            initialHour = currentTime.get(Calendar.HOUR_OF_DAY),
+            initialMinute = currentTime.get(Calendar.MINUTE),
+            is24Hour = true,
+        )
+        Column {
+            TimePicker(
+                state = timePickerState,
+                modifier=modifier
+            )
+            Button(onClick = {
+                onSelect()
+                viewModel.selected_time_hour=timePickerState.hour
+                viewModel.selected_time_min=timePickerState.minute
+            }, modifier = Modifier.padding(5.dp)) {
+                Text("Select", fontWeight = FontWeight.Black, fontSize = 10.sp)
+            }
+        }
+    return StringBuilder("Selected Time:"+viewModel.selected_time_hour.toString()+":"+viewModel.selected_time_min.toString()).toString()
+    }
     @Composable
     fun information(label: String,start : String){
         var heading by remember { mutableStateOf(start) }
@@ -1488,6 +1614,11 @@ class MainActivity : ComponentActivity() {
                     println("change:"+viewModel.get_date_chaged1())
                     println("printing:"+entity1+it)
                     println("retreiving tasks for:"+viewModel.month_highlighted)
+                    if(it!=null){
+                        if(it.id==(100*LocalDateTime.now().monthValue+LocalDateTime.now().dayOfMonth)){
+                       //   viewModel.setOFF_scheduler(it,applicationContext)
+                        }
+                    }
                     if (viewModel.get_date_chaged1()) {
                         println("true entered")
                         entity1 = it
@@ -1495,12 +1626,12 @@ class MainActivity : ComponentActivity() {
                         viewModel.set_entity(entity1)
                     }
                     else if(entity1!=null&&it!=null) {
-                            if((it!=viewModel.get_entitiy())&&(!viewModel.updating)&&(it.id==(viewModel.date_higlighted+100*viewModel.month_highlighted))) {
+                        if((it!=viewModel.get_entitiy())&&(!viewModel.updating)&&(it.id==(viewModel.date_higlighted+100*viewModel.month_highlighted))) {
                                 println("diff" + viewModel.get_entitiy() + " " + it)
                                 viewModel.set_entity(it)
                                 entity1 = it
                                 mode = !mode
-                            }
+                        }
                         }else{
                             println("same:"+entity1)
                         }
@@ -1898,6 +2029,7 @@ class MainActivity : ComponentActivity() {
            }
         return  change
     }
+
     fun show_count(){
         viewModel.all_days.observe(this) {
             entities= it.toMutableList()

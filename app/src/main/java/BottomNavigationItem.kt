@@ -35,6 +35,3 @@ data class BottomNavigationItem(
         )
     }
 }
-/*
-
-icon= ImageVector.vectorResource(id = R.drawable.plan),*/

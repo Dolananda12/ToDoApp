@@ -1,6 +1,7 @@
 package com.example.todoapp.Database
 
 import androidx.lifecycle.LiveData
+import androidx.room.Entity
 import androidx.room.Insert
 
 class Repository (private val dao: DayDAO){
@@ -18,7 +19,7 @@ class Repository (private val dao: DayDAO){
     suspend fun deleteDay(entitiy: DayEntitiy){
         dao.deleeteDay(entitiy)
     }
-     fun getDay(key : Int) :LiveData<DayEntitiy>{
+    fun getDay(key : Int) :LiveData<DayEntitiy>{
          return dao.getEntityById(key)
     }
     suspend fun deleteAllEntities(){

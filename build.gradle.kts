@@ -5,5 +5,6 @@ plugins {
     kotlin("kapt") version "1.9.0" apply false
     val room_version = "2.6.1"
     id("androidx.room") version room_version apply false
+    id("com.google.gms.google-services") version "4.4.2" apply false
 
 }

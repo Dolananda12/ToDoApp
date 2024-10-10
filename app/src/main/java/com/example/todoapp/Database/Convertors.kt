@@ -15,7 +15,6 @@ class Converters {
     fun fromTaskStructureList(taskStructureList: MutableList<TaskStructure>): String {
         return gson.toJson(taskStructureList)
     }
-
     @TypeConverter
     fun toTaskStructureList(taskStructureListString: String): MutableList<TaskStructure> {
         val type = object : TypeToken<MutableList<TaskStructure>>() {}.type
@@ -25,11 +24,19 @@ class Converters {
     fun fromNoteStructure(taskStructureList: NoteStructure): String {
         return gson.toJson(taskStructureList)
     }
-
     @TypeConverter
     fun toNoteStructure(taskStructureListString: String): NoteStructure {
         val type = object : TypeToken<NoteStructure>() {}.type
         return gson.fromJson(taskStructureListString, type)
+    }
+    @TypeConverter
+    fun fromTokenEntity(tokenEntity: TokenEntity):String{
+        return gson.toJson(tokenEntity)
+    }
+    @TypeConverter
+    fun toTokenEntity(tokenEntityString :String):TokenEntity{
+        val type = object : TypeToken<TokenEntity>() {}.type
+        return gson.fromJson(tokenEntityString,type)
     }
      @TypeConverter
     fun fromStringList(value: MutableList<String>): String {
