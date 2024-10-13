@@ -3,6 +3,7 @@ import BottomNavigationItem
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
+import android.content.Entity
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.ImageDecoder
@@ -135,6 +136,9 @@ import com.maxkeppeler.sheets.calendar.CalendarDialog
 import com.maxkeppeler.sheets.calendar.models.CalendarConfig
 import com.maxkeppeler.sheets.calendar.models.CalendarSelection
 import com.maxkeppeler.sheets.calendar.models.CalendarStyle
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import java.time.Duration
 import java.util.Calendar
 import java.util.concurrent.TimeUnit
@@ -527,7 +531,6 @@ class MainActivity : ComponentActivity() {
     @Composable
     fun showCalender(closeSelection: UseCaseState.() -> Unit,navHostController: NavHostController){
         val localDate=LocalDate.of(2025,viewModel.month_highlighted,viewModel.date_higlighted)
-
         CalendarDialog(
             state = rememberUseCaseState(visible = true, onCloseRequest = {
                 closeSelection() }),
@@ -1110,10 +1113,11 @@ class MainActivity : ComponentActivity() {
                                 ).observe(this@MainActivity, Observer {
                                     if (it == true) {
                                         Toast.makeText(context, "saved", Toast.LENGTH_SHORT).show()
-                                        navHostController.popBackStack()
+                                        navHostController.navigate("home")
                                         viewModel.reset_tasks()
                                         viewModel.set_date_changed_1(true)
                                         viewModel.reset()
+
                                     } else {
                                         Toast.makeText(context, "saving..", Toast.LENGTH_SHORT)
                                             .show()
@@ -1608,37 +1612,6 @@ class MainActivity : ComponentActivity() {
         var mode by remember {
             mutableStateOf(false)
         }
-        try {
-            viewModel.retrieveDayTasks(viewModel.date_higlighted, viewModel.month_highlighted)
-                .observe(this, Observer { it ->
-                    println("change:"+viewModel.get_date_chaged1())
-                    println("printing:"+entity1+it)
-                    println("retreiving tasks for:"+viewModel.month_highlighted)
-                    if(it!=null){
-                        if(it.id==(100*LocalDateTime.now().monthValue+LocalDateTime.now().dayOfMonth)){
-                       //   viewModel.setOFF_scheduler(it,applicationContext)
-                        }
-                    }
-                    if (viewModel.get_date_chaged1()) {
-                        println("true entered")
-                        entity1 = it
-                        viewModel.set_date_changed_1(false)
-                        viewModel.set_entity(entity1)
-                    }
-                    else if(entity1!=null&&it!=null) {
-                        if((it!=viewModel.get_entitiy())&&(!viewModel.updating)&&(it.id==(viewModel.date_higlighted+100*viewModel.month_highlighted))) {
-                                println("diff" + viewModel.get_entitiy() + " " + it)
-                                viewModel.set_entity(it)
-                                entity1 = it
-                                mode = !mode
-                        }
-                        }else{
-                            println("same:"+entity1)
-                        }
-                  })
-        }catch (e:  RuntimeException){
-            println("error occurred")
-        }
         val c : Boolean? = false
         var change by remember { mutableStateOf(c) } /* aimed to recompose if any Task gets deleted*/
         var clicked by remember {
@@ -1676,34 +1649,9 @@ class MainActivity : ComponentActivity() {
                     Text(text = "Add Task")
                 }
             }
-            if (entity1 == null || entity1!!.tasksList.size == 0) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Card(
-                        Modifier
-                            .fillMaxWidth()
-                            .padding(10.dp)){
-                        Text(
-                            text = "No tasks present!!",
-                            fontWeight = FontWeight.Bold,
-                            textAlign = TextAlign.Center,
-                            fontSize = 20.sp,
-                            modifier = Modifier.padding(10.dp)
-                        )
-                        Text(
-                            text = "View Undone Tasks",
-                            fontWeight = FontWeight.Normal,
-                            textAlign = TextAlign.Center,
-                            fontSize = 15.sp,
-                            modifier = Modifier
-                                .padding(10.dp)
-                                .clickable {
-                                    clicked = true
-                                }
-                        )
-                    }
-                }
-            }else
-                change=showDailyTask(entitiy = viewModel.get_entitiy(),navHostController)
+            showDailyTask(navHostController) {
+                clicked = true
+            }
             if(clicked){
                 FullScreenDialogExample({
                     clicked=false
@@ -1923,111 +1871,185 @@ class MainActivity : ComponentActivity() {
         }
     }
     @Composable
-    fun showDailyTask(entitiy: DayEntitiy?,navHostController: NavHostController) : Boolean{
+    fun showDailyTask(navHostController: NavHostController,onClick: () -> Unit){
         var change by remember { mutableStateOf(false) }
-        var tasklist : MutableList<TaskStructure> =ArrayList()
-        if(entitiy!=null) {
-            tasklist = entitiy.tasksList
+        var height by remember {
+            mutableStateOf(0)
         }
-         var height by remember {
-                mutableStateOf(0)
+        var entity by remember {
+            mutableStateOf<DayEntitiy?>(viewModel.dayEntitiy)
+        }
+        println("composed:$change")
+        println("showing:" + entity)
+        LaunchedEffect(key1 = viewModel.date_higlighted) {
+            println("key changed:${viewModel.date_higlighted}")
+            try {
+                entity = async {
+                    viewModel.retrieveDayTasks(viewModel.date_higlighted,viewModel.month_highlighted)
+                }.await()
+                viewModel.dayEntitiy=entity
+                println("waited for:$entity")
+            }catch (e : Exception){
+                e.printStackTrace()
             }
-            println("showing:"+tasklist)
-            Column(modifier = Modifier
-                .fillMaxSize()
-                .onGloballyPositioned {
-                    height = it.size.height
-                }) {
-                if (elements_presenet(tasklist, false)) {
-                    LazyColumn(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(0.dp, (0.7f * height).dp)
-                    ) {
-                        var count = 0
-                        items(items = tasklist) {
-                            if (!it.complete) {
-                                if (entitiy != null) {
+        }
+        if (entity != null) {
+            val taskList = entity!!.tasksList
+            if (taskList.size > 0) {
+                println("entered if for content rendering :$entity")
+                Column(modifier = Modifier
+                    .fillMaxSize()
+                    .onGloballyPositioned {
+                        height = it.size.height
+                    }) {
+                    if (elements_presenet(taskList, false)) {
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(0.dp, (0.7f * height).dp)
+                        ) {
+                            var count = 0
+                            items(items = taskList) {
+                                if (!it.complete) {
                                     TaskStructure1(
                                         task_description = it.description,
                                         check = it.complete,
                                         task_heading = it.heading,
-                                        entitiy,
+                                        entity!!,
                                         count,
                                         navHostController
                                     ) {
                                         change = !change
                                     }
+                                    Spacer(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(15.dp)
+                                    )
                                 }
-                                Spacer(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(15.dp)
-                                )
+                                count++
                             }
-                            count++
                         }
                     }
-                }
-                var expandable by remember {
-                    mutableStateOf(true)
-                }
-                Column(
-                    modifier = Modifier.fillMaxSize(),
-                    verticalArrangement = Arrangement.Bottom
-                ) {
-                    Column(modifier = Modifier.heightIn(0.dp, (0.25f * height).dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text(
-                                text = "Completed Tasks",
-                                color = Color.Blue,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 20.sp,
-                                modifier = Modifier.padding(10.dp)
-                            )
-                            IconButton(onClick = { expandable = !expandable }) {
-                                if (!expandable)
-                                    Icon(Icons.Filled.KeyboardArrowUp, "Up")
-                                else
-                                    Icon(Icons.Filled.KeyboardArrowDown, "Down")
+                    var expandable by remember {
+                        mutableStateOf(true)
+                    }
+                    Column(
+                        modifier = Modifier.fillMaxSize(),
+                        verticalArrangement = Arrangement.Bottom
+                    ) {
+                        Column(modifier = Modifier.heightIn(0.dp, (0.25f * height).dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = "Completed Tasks",
+                                    color = Color.Blue,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 20.sp,
+                                    modifier = Modifier.padding(10.dp)
+                                )
+                                IconButton(onClick = {
+                                    expandable = !expandable
+                                }) {
+                                    if (!expandable)
+                                        Icon(Icons.Filled.KeyboardArrowUp, "Up")
+                                    else
+                                        Icon(Icons.Filled.KeyboardArrowDown, "Down")
+                                }
                             }
-                        }
-                        if (expandable) {
-                            if (elements_presenet(tasklist, true)) {
-                                LazyColumn(modifier = Modifier.heightIn(0.dp, (0.3f * height).dp)) {
-                                    var count = 0
-                                    items(items = tasklist) {
-                                        if (it.complete) {
-                                            if (entitiy != null) {
+                            if (expandable) {
+                                if (elements_presenet(taskList, true)) {
+                                    LazyColumn(
+                                        modifier = Modifier.heightIn(
+                                            0.dp,
+                                            (0.3f * height).dp
+                                        )
+                                    ) {
+                                        var count = 0
+                                        items(items = taskList) {
+                                            if (it.complete) {
                                                 TaskStructure1(
                                                     task_description = it.description,
                                                     check = it.complete,
                                                     task_heading = it.heading,
-                                                    entitiy,
+                                                    entity!!,
                                                     count,
                                                     navHostController
                                                 ) {
                                                     change = !change
                                                 }
+                                                Spacer(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .height(15.dp)
+                                                )
                                             }
-                                            Spacer(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .height(15.dp)
-                                            )
+                                            count++
                                         }
-                                        count++
                                     }
                                 }
                             }
                         }
                     }
                 }
-           }
-        return  change
+            }else {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Card(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(10.dp)
+                    ) {
+                        Text(
+                            text = "No tasks present!!",
+                            fontWeight = FontWeight.Bold,
+                            textAlign = TextAlign.Center,
+                            fontSize = 20.sp,
+                            modifier = Modifier.padding(10.dp)
+                        )
+                        Text(
+                            text = "View Undone Tasks",
+                            fontWeight = FontWeight.Normal,
+                            textAlign = TextAlign.Center,
+                            fontSize = 15.sp,
+                            modifier = Modifier
+                                .padding(10.dp)
+                                .clickable {
+                                    onClick()
+                                }
+                        )
+                    }
+                }
+            }
+        } else {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Card(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(10.dp)
+                ) {
+                    Text(
+                        text = "No tasks present!!",
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center,
+                        fontSize = 20.sp,
+                        modifier = Modifier.padding(10.dp)
+                    )
+                    Text(
+                        text = "View Undone Tasks",
+                        fontWeight = FontWeight.Normal,
+                        textAlign = TextAlign.Center,
+                        fontSize = 15.sp,
+                        modifier = Modifier
+                            .padding(10.dp)
+                            .clickable {
+                                onClick()
+                            }
+                    )
+                }
+            }
+        }
     }
 
     fun show_count(){
@@ -2037,7 +2059,8 @@ class MainActivity : ComponentActivity() {
         }
     }
     fun elements_presenet(taskList: MutableList<TaskStructure>,complete : Boolean):Boolean{
-         for(i in 0..taskList.size-1){
+        println("tasks to be present:$taskList")
+        for(i in 0..taskList.size-1){
              if(complete==taskList[i].complete)
                  return true
          }

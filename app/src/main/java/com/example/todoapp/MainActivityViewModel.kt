@@ -7,6 +7,7 @@ import android.util.Log
 import android.widget.Toast
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
+import androidx.lifecycle.Observer
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.work.Constraints
@@ -57,6 +58,7 @@ class MainActivityViewModel(private val repository: Repository,private val notes
     var date_higlighted=0
     var month_highlighted=0
     var updating = false
+    var saved = false
     var pop = false
     var calender_clicked =false
     var link : MutableList<String> = ArrayList()
@@ -123,10 +125,38 @@ class MainActivityViewModel(private val repository: Repository,private val notes
    fun get_entitiy():DayEntitiy?{
        return this.dayEntitiy
    }
-   fun retrieveDayTasks(day : Int,month : Int) :LiveData<DayEntitiy> {
-      val key = day + 100*month
-      return repository.getDay(key)
-  }
+    suspend fun retrieveDayTasks(day: Int, month: Int): DayEntitiy? {
+        val key = day + 100 * month
+
+        // Create a CompletableDeferred to hold the result of DayEntity
+        val entityRetrieved = CompletableDeferred<DayEntitiy?>()
+
+        try {
+            val liveData = repository.getDay(key)
+                val observer = object : Observer<DayEntitiy?> {
+                    override fun onChanged(dayEntity: DayEntitiy?) {
+                        if (dayEntity != null) {
+                            entityRetrieved.complete(dayEntity) // Successfully complete with the retrieved entity
+                        } else {
+                              entityRetrieved.complete(null)
+                             // Complete with exception
+                        }
+                        liveData.removeObserver(this)
+                    }
+                }
+
+            // Observe the LiveData
+            liveData.observeForever(observer)
+
+            // Await the result (this suspends until the CompletableDeferred is completed)
+            return entityRetrieved.await()
+
+        } catch (e: Exception) {
+            // Handle exception and complete the CompletableDeferred exceptionally
+            entityRetrieved.completeExceptionally(e)
+            throw e
+        }
+    }
   fun set_link(list : MutableList<String>){
       Log.i("MYTAG","1:"+list.toString())
       link=list
