@@ -1,5 +1,6 @@
 package com.example.todoapp
 import BottomNavigationItem
+import android.app.Activity
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
@@ -137,8 +138,11 @@ import com.maxkeppeler.sheets.calendar.models.CalendarConfig
 import com.maxkeppeler.sheets.calendar.models.CalendarSelection
 import com.maxkeppeler.sheets.calendar.models.CalendarStyle
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import java.time.Duration
 import java.util.Calendar
 import java.util.concurrent.TimeUnit
@@ -146,7 +150,7 @@ import java.util.concurrent.TimeUnit
 class MainActivity : ComponentActivity() {
     var index=2
     private lateinit var viewModel: MainActivityViewModel
-    var updating = false
+
     var entities :MutableList<DayEntitiy> = ArrayList()
     @RequiresApi(Build.VERSION_CODES.TIRAMISU)
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -161,47 +165,29 @@ class MainActivity : ComponentActivity() {
         viewModel = ViewModelProvider(this, factory)[MainActivityViewModel::class.java]
         viewModel.init()
         viewModel.set_date_changed_1(true)
+        dola()
         setContent {
-
-            /*viewModel.insertToken(this)
-          */BottomNavigationBar()
-            /* viewModel.delete_task_error(DayEntitiy(viewModel.date_higlighted+100*viewModel.month_highlighted,ArrayList()))*/
+            val sharedPreferences = getSharedPreferences("app_preferences", Context.MODE_PRIVATE)
+          BottomNavigationBar()
             show_count()
-            val permissionLauncher = rememberLauncherForActivityResult(
-                contract = ActivityResultContracts.RequestPermission(),
-                onResult = {
+            val k =sharedPreferences.getString("permission",null)
+            println("permission:$k")
+            if(k==null) {
+                 val permissionLauncher = rememberLauncherForActivityResult(
+                    contract = ActivityResultContracts.RequestPermission(),
+                    onResult = {
+                        if (it) {
+                            sharedPreferences.edit().putString("permission", "yes").apply()
+                        } else {
+                            sharedPreferences.edit().putString("permission", "no").apply()
+                        }
+                    }
+                )
+                LaunchedEffect(key1 = true) {
+                    permissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
                 }
-            )
-            SideEffect {
-                permissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
-            }
-            LaunchedEffect(key1 = true) {
-                val workRequest = PeriodicWorkRequestBuilder<IncompleteTaskWorker>(
-                    repeatInterval = 5,
-                    repeatIntervalTimeUnit = TimeUnit.HOURS
-                ).setBackoffCriteria(
-                    backoffPolicy = BackoffPolicy.LINEAR,
-                    duration = Duration.ofSeconds(15)
-                ).build()
-                val workManager = WorkManager.getInstance(applicationContext)
-                /*workManager.enqueueUniquePeriodicWork(
-                    "Unique",
-                    ExistingPeriodicWorkPolicy.KEEP,
-                    workRequest
-                )*/
-                workManager.enqueue(workRequest)
             }
         }
-        val notificationManager  = applicationContext.getSystemService(Context.NOTIFICATION_SERVICE)
-        createNotificationChannel(notificationManager as NotificationManager)
-    }
-    fun createNotificationChannel(notificationManager: NotificationManager){
-      val channel  = NotificationChannel(Constansts12.PUSH_NOTIFICATION_CHANNEL_ID,Constansts12
-          .PUSH_NOTIFICATION_CHANNEL_NAME,NotificationManager.IMPORTANCE_HIGH)
-          .apply {
-             enableLights(true)
-          }
-      notificationManager.createNotificationChannel(channel)
     }
     @Composable
     fun BottomNavigationBar() {
@@ -1769,6 +1755,17 @@ class MainActivity : ComponentActivity() {
                 ) {
                     content()
                 }
+            }
+        }
+    }
+    fun dola(){
+        runBlocking {
+            withContext(Dispatchers.IO){
+                println("dola1")
+            withContext(Dispatchers.Default){
+                println("dola2")
+            }
+            println("dola3")
             }
         }
     }
