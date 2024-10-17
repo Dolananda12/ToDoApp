@@ -24,7 +24,6 @@ import com.example.todoapp.Database.Repository
 import com.example.todoapp.Database.TaskStructure
 import com.example.todoapp.Database.TokenEntity
 import com.example.todoapp.Database.TokenRepository
-import com.example.todoapp.Notificaiton.ScheduleNotificationsWorker
 import com.example.todoapp.Notificaiton.SchedulerObject
 import com.example.todoapp.Notificaiton.SendTaskWorker
 import com.example.todoapp.Notificaiton.getNotficationData
@@ -161,74 +160,7 @@ class MainActivityViewModel(private val repository: Repository,private val notes
       Log.i("MYTAG","1:"+list.toString())
       link=list
   }
-  fun setOFF_scheduler(entitiy: DayEntitiy,context: Context){
-     viewModelScope.launch {
-         val tasklist = entitiy.tasksList
-         println("1:$tasklist")
-         println("2:$list")
-         if (tasklist.size > 0 && tasklist != list) {
-             var index = -1
-             var t = -1
-             val h =  LocalDateTime.now().minute +1000*LocalDateTime.now().hour
-             for (i in 0..<tasklist.size) {
-                 val t_i = 1000 * tasklist[i].timeHour + tasklist[i].timeMin
-                 println("value is 2:$h")
-                 if (t_i >=h) {
-                     t = t_i
-                     index = i
-                 }
-             }
-             for (i in 0..<tasklist.size) {
-                 val t_i = 1000 * tasklist[i].timeHour + tasklist[i].timeMin
-                 if (t_i >=h && t >=t_i) {
-                     t = t_i
-                     index = i
-                 }
-             }
-             println("index is:$index")
-             if (index != -1) {
-                 if(tasklist[index]!= getNotficationData(context)!!.task) {
-                     println("scheduling notification for:${tasklist[index]}")
-                     val oneTimeWorkRequest =
-                         OneTimeWorkRequestBuilder<ScheduleNotificationsWorker>().setConstraints(
-                             Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED)
-                                 .build()
-                         ).build()
-                     WorkManager.getInstance(context).enqueue(oneTimeWorkRequest)
-                     list = tasklist
-                     storeNotificationData(
-                         context, Json.encodeToString(
-                             SchedulerObject.serializer(), SchedulerObject(
-                                 tasklist[index].timeHour, tasklist[index].timeMin,
-                                 tasklist[index]
-                             )
-                         )
-                     )
-                 }else{
-                     println("duplicate 2")
-                 }
-             } else {
-                 println("duplicate")
-             }
-         }else{
-             println("schedulable tasks not present")
-         }
-     }
-  }
-  fun renderRequest(entitiy: DayEntitiy,context: Context){
-     CoroutineScope(Dispatchers.Main).launch {
-         val token_1 = async {
-             getToken()
-         }.await()
-         val notification = NotificationDetail(entitiy.tasksList.toMutableList(),token,"Hi")
-         val notification_Json = GsonBuilder().create().toJson(notification).toString()
-         val taskdata = Data.Builder().putString("Notification",notification_Json)
-             .build()
-         val oneTimeRequest = OneTimeWorkRequestBuilder<SendTaskWorker>().setInputData(taskdata)
-             .build()
-         WorkManager.getInstance(context).enqueue(oneTimeRequest)
-     }
-  }
+
   fun set_pay(list : MutableList<Pair<String,String>>){
       Log.i("MYTAG","2"+list.toString())
       pay=list
